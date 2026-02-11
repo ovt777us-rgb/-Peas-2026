@@ -105,7 +105,9 @@ class Peas:
 
         return resp.headers
 
-    def get_unc_listing(self, unc_path):
+    def get_unc_listing(self, unc_path, page_size=1000,
+                    max_items=50000, quiet=False, debug_paging=False):
+
         """Retrieve and return a file listing of the given UNC path."""
 
         assert self._backend == PY_ACTIVE_SYNC
@@ -120,8 +122,15 @@ class Peas:
         if password == '<none>':
             password = None
 
-        results = py_activesync_helper.get_unc_listing(self._creds, unc_path,
-            username=user, password=password)
+         results = py_activesync_helper.get_unc_listing(
+            self._creds, unc_path,
+            username=user,
+            password=password,
+  	    page_size=page_size,
+ 	    max_items=max_items,
+            quiet=quiet,
+   	    debug_paging=debug_paging
+        )
 
         return results
 
