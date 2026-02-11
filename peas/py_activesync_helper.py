@@ -285,21 +285,65 @@ def extract_emails(creds):
 
     return emails
 
-
-def get_unc_listing(creds, unc_path, username=None, password=None):
+ #-------- SHARES 1000+ BLOCK START ---------
+def get_unc_listing(creds, unc_path, username=None, password=None,
+                    page_size=1000, max_items=50000,
+                    quiet=False, debug_paging=False):
 
     # Create ActiveSync connector.
     as_conn = ASHTTPConnector(creds['server'])
     as_conn.set_credential(creds['user'], creds['password'])
 
+                        all_records = []
+    start = 0
+
+    while True:
+        end = start + page_size - 1
+        return_range = "%d-%d" % (start, end)
+
+        # Perform request (paged).
+        search_xmldoc_req = Search.build(
+            unc_path,
+            return_range=return_range,
+            username=username,
+            password=password
+        )
+        
     # Perform request.
     search_xmldoc_req = Search.build(unc_path, username=username, password=password)
     search_xmldoc_res = as_request(as_conn, "Search", search_xmldoc_req)
 
     # Parse response.
     status, records = Search.parse(search_xmldoc_res)
-    return records
 
+        if debug_paging and not quiet:
+            print("[DBG] status=%s, returned=%d, range=%s, total_collected=%d" % (
+                status, len(records), return_range, len(all_records)
+            ))
+
+        if not records:
+            break
+
+        all_records.extend(records)
+
+        if not quiet:
+            print("[*] UNC listing: got %d items (range %s), total=%d" % (
+                len(records), return_range, len(all_records)
+            ))
+
+        if len(all_records) >= max_items:
+            if not quiet:
+                print("[!] Reached max_items=%d, stopping" % max_items)
+            break
+
+        # If server returned less than a page, we assume it's the last page.
+        if len(records) < page_size:
+            break
+
+        start += page_size
+
+    return all_records
+#-------- SHARES 1000+ BLOCK END ---------
 
 def get_unc_file(creds, unc_path, username=None, password=None):
 
