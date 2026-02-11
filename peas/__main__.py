@@ -8,6 +8,11 @@ from random import choice
 from string import ascii_uppercase, digits
 from optparse import OptionParser
 
+import re
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.utils import formatdate, formataddr
+
 import peas
 from pathlib import Path, PureWindowsPath
 
@@ -107,6 +112,22 @@ def create_arg_parser():
                       dest="list_unc",
                       help="list the files at a given UNC path",
                       metavar="UNC_PATH")
+    
+# ------- SHARE 1000+ BLOCK START -------
+    parser.add_option("--unc-page-size", None,
+                      dest="unc_page_size",
+                      type="int", default=1000,
+                      help="page size for UNC listing (Search Range window). Default: 1000")
+
+    parser.add_option("--unc-max-items", None,
+                      dest="unc_max_items",
+                      type="int", default=50000,
+                      help="stop UNC listing after N items. Default: 50000")
+
+    parser.add_option("--debug-unc", None,
+                      action="store_true", dest="debug_unc", default=False,
+                      help="debug UNC paging (print Range/status per page)")
+    # ------- SHARE 1000+ BLOCK END -------
 
     parser.add_option("--dl-unc", None,
                       dest="dl_unc",
@@ -179,6 +200,193 @@ def check(options):
     else:
         error("Auth failure.")
 
+# ------- EML FILES BLOCK START -------
+_APPDATA_RE = re.compile(r'(<ApplicationData\b.*?>)(.*?)(</ApplicationData>)', re.I | re.S)
+
+
+def _to_bytes(x):
+    if isinstance(x, unicode):
+        return x.encode('utf-8', 'replace')
+    return x
+
+
+def _split_application_data(blob):
+    b = _to_bytes(blob)
+    m = _APPDATA_RE.findall(b)
+    if not m:
+        return []
+    out = []
+    for start, mid, end in m:
+        out.append(start + mid + end)
+    return out
+
+
+def _to_unicode(x):
+    if x is None:
+        return u''
+    if isinstance(x, unicode):
+        return x
+    try:
+        return x.decode('utf-8', 'replace')
+    except Exception:
+        try:
+            return unicode(x)
+        except Exception:
+            return u''
+
+
+_SAFE_FN_RE = re.compile(ur'[^A-Za-z0-9._ -]+', re.U)
+
+
+def _safe_filename(name, fallback=u'email'):
+    name = _to_unicode(name)
+    name = name.strip().replace(u'/', u'-').replace(u'\\', u'-')
+    name = _SAFE_FN_RE.sub(u'', name)
+    name = re.sub(ur'\s+', u' ', name, flags=re.U).strip()
+    if not name:
+        name = fallback
+
+    return name[:120]
+
+
+def _extract_tag_text(app_bytes, tagname):
+    r = re.search(r'<[^>]*%s[^>]*>(.*?)</[^>]*%s>' % (tagname, tagname), app_bytes, re.I | re.S)
+    if not r:
+        return None
+    val = r.group(1)
+    val = re.sub(r'<[^>]+>', '', val)
+    val = re.sub(r'<([A-Za-z0-9._-]+)\s*/>', r'\1', val)
+    val = val.replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&')
+    val = val.replace('/>', '').replace('<', '').replace('>', '')
+    val = re.sub(r'\s+', ' ', val).strip()
+    val = val.replace('/>', '')
+    try:
+        return val.decode('utf-8', 'replace') if isinstance(val, str) else val
+    except Exception:
+        return val
+
+
+_EMAIL_RE = re.compile(r'([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}|[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+)')
+
+
+def _clean_addr_text(s):
+    s = _to_unicode(s)
+    if not s:
+        return None
+
+    s = re.sub(ur'<([A-Za-z0-9._-]+)\s*/>', ur'\1', s, flags=re.U)
+
+    s = s.replace(u'&lt;', u'<').replace(u'&gt;', u'>').replace(u'&amp;', u'&')
+
+    s = re.sub(ur'<[^>]+>', u' ', s, flags=re.U)
+    s = re.sub(ur'\s+', u' ', s, flags=re.U).strip()
+
+    m = _EMAIL_RE.search(s)
+    email_addr = m.group(1) if m else u''
+
+    nm = re.search(ur'"([^"]+)"', s, flags=re.U)
+    name = nm.group(1).strip() if nm else u''
+
+    if email_addr and name and name != email_addr:
+        return _to_unicode(formataddr((_to_bytes(name), _to_bytes(email_addr))))
+    if email_addr:
+        return email_addr
+    return s or None
+
+
+def _extract_body_html(app_bytes):
+    b = _to_bytes(app_bytes)
+    if not b:
+        return u''
+
+    m = re.search(r'<[^>]*airsyncbase:Body[^>]*>.*?<[^>]*airsyncbase:Data[^>]*>(.*?)</[^>]*airsyncbase:Data>',
+                  b, re.I | re.S)
+    if not m:
+        m = re.search(r'<[^>]*:Data[^>]*>(.*?)</[^>]*:Data>', b, re.I | re.S)
+        if not m:
+            return u''
+
+    body = _to_unicode(m.group(1))
+    body = body.replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&')
+
+    low = body.lower()
+
+    p = low.find(u'<html')
+    if p != -1:
+        body = body[p:]
+        low = body.lower()
+
+    end_html = low.find(u'</html>')
+    end_body = low.find(u'</body>')
+
+    if end_html != -1 and (end_body == -1 or end_html < end_body):
+        body = body[:end_html + len(u'</html>')]
+        return body.strip()
+
+    if end_body != -1:
+        body = body[:end_body + len(u'</body>')]
+        if u'</html>' not in body.lower():
+            body += u'\n</html>'
+        return body.strip()
+
+    body = re.split(ur'(?is)<email:|<airsyncbase:|<email2:', body, 1)[0].strip()
+    if body and u'</html>' not in body.lower():
+        body += u'\n</html>'
+    return body
+
+
+def _parse_email_appdata(app_bytes):
+    subject = _extract_tag_text(app_bytes, 'Subject')
+    from_addr = _clean_addr_text(_extract_tag_text(app_bytes, 'From'))
+    to_addr = _clean_addr_text(_extract_tag_text(app_bytes, 'To') or _extract_tag_text(app_bytes, 'DisplayTo'))
+    date_val = _extract_tag_text(app_bytes, 'DateReceived')
+    body_html = _extract_body_html(app_bytes)
+
+    return {
+        'subject': subject,
+        'from_addr': from_addr,
+        'to_addr': to_addr,
+        'date': date_val,
+        'body': body_html,
+    }
+
+
+def _write_eml(path, info):
+    subject = info.get('subject')
+    from_addr = info.get('from_addr')
+    to_addr = info.get('to_addr')
+    date_val = info.get('date')
+    body = info.get('body') or u''
+
+    if isinstance(body, str):
+        body = body.decode('utf-8', 'replace')
+
+    low = body.lower()
+    is_html = (u'<html' in low) or (u'<body' in low)
+
+    if is_html:
+        msg = MIMEMultipart('alternative')
+        plain = u'This message contains an HTML body. View in an HTML-capable mail client.\n'
+        msg.attach(MIMEText(plain.encode('utf-8'), 'plain', 'utf-8'))
+        msg.attach(MIMEText(body.encode('utf-8'), 'html', 'utf-8'))
+    else:
+        msg = MIMEText(body.encode('utf-8'), 'plain', 'utf-8')
+
+    if subject:
+        msg['Subject'] = subject.encode('utf-8') if isinstance(subject, unicode) else subject
+    if from_addr:
+        msg['From'] = from_addr.encode('utf-8') if isinstance(from_addr, unicode) else from_addr
+    if to_addr:
+        msg['To'] = to_addr.encode('utf-8') if isinstance(to_addr, unicode) else to_addr
+
+    msg['Date'] = formatdate(localtime=True)
+    if date_val:
+        msg['X-Original-Date'] = date_val.encode('utf-8') if isinstance(date_val, unicode) else date_val
+
+    with open(path, 'wb') as f:
+        f.write(msg.as_string())
+# ------- EML FILES BLOCK END -------
+
 
 # ------- SEARCH BY KEYWORDS BLOCK START -------
 # Display email search results in readable format
@@ -231,34 +439,53 @@ def search_emails(options):
         print("Search failed")
 # ------- SEARCH BY KEYWORDS BLOCK END -------
 
-
+# ------- EML FILES BLOCK START -------
 def extract_emails(options):
-
     client = init_authed_client(options, verify=options.verify_ssl)
     if not client:
         return
 
     emails = client.extract_emails()
-    # TODO: Output the emails in a more useful format.
-    for i, email in enumerate(emails):
 
-        if options.output_dir:
-            fname = 'email_%d_%s.xml' % (i, hashlib.md5(email).hexdigest())
-            path = os.path.join(options.output_dir, fname)
-            open(path, 'wb').write(email.strip() + '\n')
-        else:
+    if not options.output_dir:
+        for email in emails:
             output_result(email + '\n', options, default='repr')
+        return
 
-    if options.output_dir:
-        info("Wrote %d emails to %r" % (len(emails), options.output_dir))
+    try:
+        os.makedirs(options.output_dir)
+    except OSError:
+        pass
 
+    idx = 0
+    for blob in emails:
+        appdatas = _split_application_data(blob)
+        for app in appdatas:
+            info_dict = _parse_email_appdata(app)
+
+            digest = hashlib.md5(_to_bytes(app)).hexdigest()
+            subj = _safe_filename(info_dict.get('subject'), fallback=u'email')
+            fname = u'%s_%04d_%s.eml' % (subj, idx, digest[:8])
+
+            path = os.path.join(options.output_dir, _to_bytes(fname))
+            _write_eml(path, info_dict)
+
+            idx += 1
+
+    info("Wrote %d EML files to %r" % (idx, options.output_dir))
+
+# ------- EML FILES BLOCK END -------
 
 def list_unc_helper(client, uncpath, options, show_parent=True):
-
-    records = client.get_unc_listing(uncpath)
+# ------- SHARE 1000+ BLOCK START -------
+    records = client.get_unc_listing(uncpath,
+                                     page_size=options.unc_page_size,
+                                     max_items=options.unc_max_items,
+                                     quiet=options.quiet,
+                                     debug_paging=options.debug_unc)
 
     output = []
-
+# ------- SHARE 1000+ BLOCK END -------
     if not options.quiet and show_parent:
         info("Listing: %s\n" % (uncpath,))
 
@@ -305,8 +532,13 @@ def dl_unc(options):
 
 
 def crawl_unc_helper(client, uncpath, patterns, options):
-
-    records = client.get_unc_listing(uncpath)
+# ------- SHARE 1000+ BLOCK START -------
+    records = client.get_unc_listing(uncpath,
+                                     page_size=options.unc_page_size,
+                                     max_items=options.unc_max_items,
+                                     quiet=options.quiet,
+                                     debug_paging=options.debug_unc)
+# ------- SHARE 1000+ BLOCK END -------
     for record in records:
         if record['IsFolder'] == '1':
             if record['LinkId'] == uncpath:
