@@ -33,6 +33,6 @@ python2 peas/__main__.py -u 'TESTLAB\testuser' -p 'P@ssw0rd' -O out 192.168.56.1
 ## 4) Доработка фильтрации писем по наличию пользователя в роли отправителя и/или получателя
 ```bash
 python2 -m peas -u 'TESTLAB\testuser' -p 'P@ssw0rd' 192.168.56.102 --emails --person Administrator --direction from
-```bash
+```
 
 ## 5) Доработка 5
