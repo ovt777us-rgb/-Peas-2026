@@ -142,6 +142,11 @@ def create_arg_parser():
     parser.add_option("--brute-unc", None,
                       action="store_true", dest="brute_unc",
                       help="recursively list all files at a given UNC path")
+    
+    parser.add_option("--list-gal", None,
+                      dest="list_gal",
+                      help="list GAL entries starting with a given search pattern (it should be at least 4 chars long), listing fields: DisplayName Phone Office Title Company Alias FirstName LastName MobilePhone EmailAddress",
+                      metavar="SEARCH_PATTERN")
 
     return parser
 
@@ -506,6 +511,39 @@ def list_unc_helper(client, uncpath, options, show_parent=True):
 
     output_result('\n'.join(output), options, default='stdout')
 
+def list_gal_helper(client, search_pattern, options):
+
+    records = client.get_gal_entries(search_pattern)
+
+    output = []
+
+    if not options.quiet:
+        info("Listing GAL entries starting with %s:\n" % (search_pattern))
+    
+    for record in records:
+
+        disp_name = record.get('DisplayName')
+        phone = record.get('Phone')
+        office = record.get('Office')
+        title = record.get('Title')
+        company = record.get('Company')
+        alias = record.get('Alias')
+        first_name = record.get('FirstName')
+        last_name = record.get('LastName')
+        mobile_phone = record.get('MobilePhone')
+        email = record.get('EmailAddress')
+    
+        output.append("%s %s %s %s %s %s %s %s %s %s" % (disp_name, phone, office, title, company, alias, first_name, last_name, mobile_phone, email))
+
+    output_result('\n'.join(output), options, default='stdout')
+
+def list_gal(options):
+
+    client = init_authed_client(options, verify=options.verify_ssl)
+    if not client:
+        return
+
+    list_gal_helper(client, options.list_gal, options)
 
 def list_unc(options):
 
@@ -764,6 +802,9 @@ def main():
         ran = True
     if options.brute_unc:
         brute_unc(options)
+        ran = True
+    if options.list_gal:
+        list_gal(options)
         ran = True
     if not ran:
         check_server(options)
