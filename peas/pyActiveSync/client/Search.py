@@ -26,8 +26,10 @@ class Search:
     Currently for DocumentLibrary searches only.
     """
 
+    # In GAL mode unc_path used to pass search_pattern
+
     @staticmethod
-    def build(unc_path, return_range='0-999', username=None, password=None):
+    def build(unc_path, return_range='0-999', username=None, password=None, mode=None):
 
         xmldoc_req = wapxmltree()
         xmlrootnode = wapxmlnode("Search")
@@ -38,20 +40,39 @@ class Search:
         # "GAL" to search the Global Address List.
         # "Mailbox" to search the mailbox.
         # "DocumentLibrary" to search a Windows SharePoint Services library or a UNC library.
-        name_node = wapxmlnode("Name", store_node, "DocumentLibrary")
+        
+        if mode is None:
+            name_node = wapxmlnode("Name", store_node, "DocumentLibrary")
 
-        query_node = wapxmlnode("Query", store_node)
-        equal_to_node = wapxmlnode("EqualTo", query_node)
-        link_id = wapxmlnode("documentlibrary:LinkId", equal_to_node)
-        value_node = wapxmlnode("Value", equal_to_node, unc_path)
+            query_node = wapxmlnode("Query", store_node)
+            equal_to_node = wapxmlnode("EqualTo", query_node)
+            link_id = wapxmlnode("documentlibrary:LinkId", equal_to_node)
+            value_node = wapxmlnode("Value", equal_to_node, unc_path)
 
-        options_node = wapxmlnode("Options", store_node)
-        range_node = wapxmlnode("Range", options_node, return_range)
+            options_node = wapxmlnode("Options", store_node)
+            range_node = wapxmlnode("Range", options_node, return_range)
 
-        if username is not None:
-            username_node = wapxmlnode("UserName", options_node, username)
-        if password is not None:
-            password_node = wapxmlnode("Password", options_node, password)
+            if username is not None:
+                username_node = wapxmlnode("UserName", options_node, username)
+            if password is not None:
+                password_node = wapxmlnode("Password", options_node, password)
+        
+        elif mode == "GAL":
+            name_node = wapxmlnode("Name", store_node, "GAL")
+            
+            query_node = wapxmlnode("Query", store_node, unc_path)
+
+            options_node = wapxmlnode("Options", store_node)
+            range_node = wapxmlnode("Range", options_node, return_range)
+
+            if username is not None:
+                username_node = wapxmlnode("UserName", options_node, username)
+            if password is not None:
+                password_node = wapxmlnode("Password", options_node, password)
+        
+        else:
+            #Implement Mailbox mode, if needed
+            pass
 
         return xmldoc_req
 

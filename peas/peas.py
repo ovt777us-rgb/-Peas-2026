@@ -93,6 +93,28 @@ class Peas:
 
         py_activesync_helper.disable_certificate_verification()
 
+    # ------Get GAL entries------
+
+    def get_gal_entries(self, search_pattern):
+
+        assert self._backend == PY_ACTIVE_SYNC
+
+        # Use alternative credentials for SMB if supplied.
+        user = self._creds.get('smb_user', self._creds['user'])
+        password = self._creds.get('smb_password', self._creds['password'])
+
+        # Enable the option to send no credentials at all.
+        if user == '<none>':
+            user = None
+        if password == '<none>':
+            password = None
+
+        results = py_activesync_helper.get_gal_entries(
+            self._creds, search_pattern,
+            username=user, password=password)
+
+        return results
+                                                       
     def get_server_headers(self):
         """Get the ActiveSync web server headers."""
 

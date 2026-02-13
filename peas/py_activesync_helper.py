@@ -285,6 +285,26 @@ def extract_emails(creds):
 
     return emails
 
+ #------Get GAL entries------
+
+def get_gal_entries(creds, search_pattern, username=None, password=None):
+    
+    # Create ActiveSync connector.
+    as_conn = ASHTTPConnector(creds['server'])
+    as_conn.set_credential(creds['user'], creds['password'])
+
+    # Perform request.
+    search_xmldoc_req = Search.build(
+        search_pattern, return_range="0-99",
+        username=username, password=password,
+        mode="GAL"
+        )
+    search_xmldoc_res = as_request(as_conn, "Search", search_xmldoc_req)
+
+    # Parse response.
+    status, records = Search.parse(search_xmldoc_res)
+    return records
+
  #-------- SHARES 1000+ BLOCK START ---------
 def get_unc_listing(creds, unc_path, username=None, password=None,
                     page_size=1000, max_items=50000,
