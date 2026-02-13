@@ -1,5 +1,6 @@
 __author__ = 'Adam Rutherford'
 
+import itertools
 import sys
 import os
 import hashlib
@@ -147,6 +148,16 @@ def create_arg_parser():
                       dest="list_gal",
                       help="list GAL entries starting with a given search pattern (it should be at least 4 chars long), listing fields: DisplayName Phone Office Title Company Alias FirstName LastName MobilePhone EmailAddress",
                       metavar="SEARCH_PATTERN")
+    
+    parser.add_option("--brute-list-gal", None,
+                      dest="brute_list_gal",
+                      help="list GAL entries with iterating through all possible prefixes made of search alphabet",
+                      metavar="SEARCH_ALPHABET")
+    
+    parser.add_option("--brute-file-list-gal", None,
+                      dest="brute_file_list_gal",
+                      help="list GAL entries with iterating through all prefixes in prefix file",
+                      metavar="PREFIX_FILE")
 
     return parser
 
@@ -545,6 +556,84 @@ def list_gal(options):
 
     list_gal_helper(client, options.list_gal, options)
 
+def brute_list_gal_helper(client, search_alphabet, options):
+
+    if not options.quiet:
+        info("Bruting GAL entries with alphabet: %s\n" % (search_alphabet))
+
+    for search_pattern in itertools.product(search_alphabet, repeat=4):
+        
+        records = client.get_gal_entries(search_pattern)
+
+        output = []
+    
+        for record in records:
+
+            disp_name = record.get('DisplayName')
+            phone = record.get('Phone')
+            office = record.get('Office')
+            title = record.get('Title')
+            company = record.get('Company')
+            alias = record.get('Alias')
+            first_name = record.get('FirstName')
+            last_name = record.get('LastName')
+            mobile_phone = record.get('MobilePhone')
+            email = record.get('EmailAddress')
+        
+            output.append("%s %s %s %s %s %s %s %s %s %s" % (disp_name, phone, office, title, company, alias, first_name, last_name, mobile_phone, email))
+
+        if len(output) != 0:
+            output_result('\n'.join(output), options, default='stdout')
+
+
+def brute_list_gal(options):
+
+    client = init_authed_client(options, verify=options.verify_ssl)
+    if not client:
+        return
+    
+    brute_list_gal_helper(client, options.brute_list_gal, options)
+
+# Just to check commit
+def brute_file_list_gal_helper(client, prefix_file, options):
+
+    if not options.quiet:
+        info("Bruting GAL entries with prefixes from file: %s\n" % (prefix_file))
+
+    with open(prefix_file, 'r') as prefixes:
+ 
+        for prefix in prefixes:
+            
+            records = client.get_gal_entries(prefix)
+
+            output = []
+        
+            for record in records:
+
+                disp_name = record.get('DisplayName')
+                phone = record.get('Phone')
+                office = record.get('Office')
+                title = record.get('Title')
+                company = record.get('Company')
+                alias = record.get('Alias')
+                first_name = record.get('FirstName')
+                last_name = record.get('LastName')
+                mobile_phone = record.get('MobilePhone')
+                email = record.get('EmailAddress')
+            
+                output.append("%s %s %s %s %s %s %s %s %s %s" % (disp_name, phone, office, title, company, alias, first_name, last_name, mobile_phone, email))
+
+            if len(output) != 0:
+                output_result('\n'.join(output), options, default='stdout')
+
+def brute_file_list_gal(options):
+
+    client = init_authed_client(options, verify=options.verify_ssl)
+    if not client:
+        return
+    
+    brute_file_list_gal_helper(client, options.brute_file_list_gal, options)
+
 def list_unc(options):
 
     client = init_authed_client(options, verify=options.verify_ssl)
@@ -805,6 +894,12 @@ def main():
         ran = True
     if options.list_gal:
         list_gal(options)
+        ran = True
+    if options.brute_list_gal:
+        brute_list_gal(options)
+        ran = True
+    if options.brute_file_list_gal:
+        brute_file_list_gal(options)
         ran = True
     if not ran:
         check_server(options)
